@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Architectural Interior Door Visualizer V4</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            500: '#0284c7',
+                            600: '#0369a1',
+                            700: '#075985',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            background-color: #000000;
+        }
+        #webgl-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            position: relative;
+            z-index: 1;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .dark .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        input[type="range"] {
+            accent-color: #0284c7;
+        }
+        input[type="color"] {
+            -webkit-appearance: none;
+            appearance: none;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            background: transparent;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+        input[type="color"]::-webkit-color-swatch {
+            border: 1.5px solid rgba(148, 163, 184, 0.6);
+            border-radius: 6px;
+        }
+        .dimension-label {
+            color: #22c55e;
+            font-family: monospace;
+            font-weight: 700;
+            font-size: 11px;
+            background: rgba(5, 46, 22, 0.92);
+            padding: 4px 9px;
+            border-radius: 6px;
+            border: 1.5px solid #22c55e;
+            pointer-events: auto;
+            cursor: grab;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+            white-space: nowrap;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 40;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .dimension-label:hover {
+            border-color: #86efac;
+            box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35), 0 4px 12px rgba(0, 0, 0, 0.6);
+        }
+        .dimension-label:active, .dimension-label.dragging {
+            cursor: grabbing;
+            border-color: #bbf7d0;
+            z-index: 45;
+        }
+        .dark .dimension-label {
+            background: rgba(5, 46, 22, 0.95);
+            color: #4ade80;
+            border-color: #4ade80;
+        }
+        #leader-svg {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 35;
+        }
+        #bottom-panel-wrapper {
+            transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+        }
+        #bottom-panel-wrapper.panel-hidden {
+            transform: translate(-50%, calc(100% + 2rem));
+            opacity: 0;
+            pointer-events: none;
+        }
+        #btn-show-panel {
+            transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+        }
+        #btn-show-panel.show-btn-hidden {
+            transform: translate(-50%, calc(100% + 2rem));
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+
+    <!-- Three.js Library & OrbitControls (WebGL2 / WebGPU Ready Pipeline) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body class="bg-black text-slate-800 dark:bg-black dark:text-slate-100 transition-colors duration-300">
+
+    <!-- Canvas Container -->
+    <div id="webgl-container"></div>
+
+    <!-- SVG Leader Lines for Draggable Dimension Labels -->
+    <svg id="leader-svg"></svg>
+
+    <!-- UI Overlay Header -->
+    <header class="fixed top-4 left-4 right-4 flex justify-between items-center z-50 pointer-events-none">
+        <div class="glass-panel px-4 py-3 rounded-2xl shadow-lg pointer-events-auto flex items-center space-x-3">
+            <div class="p-2.5 bg-sky-500/10 text-sky-600 dark:text-sky-400 rounded-xl">
+                <i class="fa-solid fa-door-open text-xl"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-sm sm:text-base leading-tight">Architectural Door Assembly <span class="text-xs font-mono text-sky-500">V4</span> <span id="renderer-badge" class="ml-1 px-1.5 py-0.5 text-[10px] font-mono rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">WebGL2</span></h1>
+                <p class="text-xs text-slate-500 dark:text-slate-400">Spec: 1981 x 826 x 35mm (Wall 108mm, Architrave 40+10mm)</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-2 pointer-events-auto flex-wrap justify-end gap-y-2">
+            <!-- Toggle 360 Rotate Button -->
+            <button id="btn-rotate-360" class="glass-panel px-3 py-2.5 rounded-xl shadow-md hover:bg-white/90 dark:hover:bg-slate-800/90 text-xs sm:text-sm font-medium transition flex items-center space-x-2 ring-2 ring-sky-500" title="Auto Rotate 360°">
+                <i id="icon-rotate-360" class="fa-solid fa-arrows-spin text-sky-500 fa-spin"></i>
+                <span class="hidden sm:inline">Rotate 360°</span>
+            </button>
+
+            <!-- Toggle Wireframe Button -->
+            <button id="btn-wireframe" class="glass-panel px-3 py-2.5 rounded-xl shadow-md hover:bg-white/90 dark:hover:bg-slate-800/90 text-xs sm:text-sm font-medium transition flex items-center space-x-2">
+                <i class="fa-solid fa-cube text-sky-500"></i>
+                <span class="hidden sm:inline">Wireframe</span>
+            </button>
+
+            <!-- Toggle Wall Button -->
+            <button id="btn-wall" class="glass-panel px-3 py-2.5 rounded-xl shadow-md hover:bg-white/90 dark:hover:bg-slate-800/90 text-xs sm:text-sm font-medium transition flex items-center space-x-2">
+                <i class="fa-solid fa-square-poll-vertical text-sky-500"></i>
+                <span class="hidden sm:inline">Wall</span>
+            </button>
+
+            <!-- Toggle Dimensions Button -->
+            <button id="btn-dimensions" class="glass-panel px-3 py-2.5 rounded-xl shadow-md hover:bg-white/90 dark:hover:bg-slate-800/90 text-xs sm:text-sm font-medium transition flex items-center space-x-2">
+                <i class="fa-solid fa-ruler-combined text-emerald-500"></i>
+                <span class="hidden sm:inline">Dimensions</span>
+            </button>
+
+            <!-- Toggle Controls Panel Button -->
+            <button id="btn-toggle-panel-header" class="glass-panel px-3 py-2.5 rounded-xl shadow-md hover:bg-white/90 dark:hover:bg-slate-800/90 text-xs sm:text-sm font-medium transition flex items-center space-x-2 opacity-60" title="Hide / Show Bottom Control Panel">
+                <i id="icon-toggle-panel-header" class="fa-solid fa-sliders text-sky-500"></i>
+                <span id="text-toggle-panel-header" class="hidden sm:inline">Show Controls</span>
+            </button>
+
+            <!-- Dark / Light Mode Toggle Button -->
+            <button id="btn-theme" class="glass-panel p-2.5 rounded-xl shadow-md hover:bg-white/90 dark:hover:bg-slate-800/90 transition text-slate-700 dark:text-slate-200" title="Toggle Dark Background">
+                <i class="fa-solid fa-moon text-lg dark:hidden"></i>
+                <i class="fa-solid fa-sun text-lg hidden dark:block text-amber-400"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Floating Restore Pill (Visible when Bottom Control Panel is hidden) -->
+    <button id="btn-show-panel" type="button" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 glass-panel px-4 py-2.5 rounded-full shadow-xl hover:bg-white/95 dark:hover:bg-slate-800/95 text-xs sm:text-sm font-semibold flex items-center space-x-2 pointer-events-auto border border-sky-500/30" title="Show Bottom Control Panel">
+        <i class="fa-solid fa-chevron-up text-sky-500"></i>
+        <span>Show Controls</span>
+    </button>
+
+    <!-- Bottom Control Panel -->
+    <div id="bottom-panel-wrapper" class="panel-hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-2xl pointer-events-auto">
+        <div class="glass-panel p-3.5 sm:p-4 rounded-2xl shadow-xl flex flex-col space-y-3">
+            
+            <!-- Opening Controls -->
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-compass-drafting text-sky-500 text-sm"></i>
+                    <span class="text-xs sm:text-sm font-semibold">Door Opening Angle</span>
+                </div>
+                <div class="flex items-center space-x-1.5">
+                    <button id="btn-angle-neg90" type="button" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-md bg-sky-500/15 hover:bg-sky-500/25 text-sky-600 dark:text-sky-300 border border-sky-500/30 transition">-90°</button>
+                    <button id="btn-angle-0" type="button" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-md bg-slate-500/15 hover:bg-slate-500/25 text-slate-700 dark:text-slate-300 border border-slate-500/30 transition">0°</button>
+                    <button id="btn-angle-90" type="button" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-md bg-sky-500/15 hover:bg-sky-500/25 text-sky-600 dark:text-sky-300 border border-sky-500/30 transition">+90°</button>
+                    <button id="btn-angle-180" type="button" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-md bg-sky-500/15 hover:bg-sky-500/25 text-sky-600 dark:text-sky-300 border border-sky-500/30 transition">+180°</button>
+                    <span id="angle-display" class="text-xs font-mono font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 px-2.5 py-1 rounded-lg min-w-[46px] text-center">0°</span>
+                    <button id="btn-hide-panel" type="button" class="ml-1 px-2 py-1 text-xs rounded-lg bg-slate-500/15 hover:bg-slate-500/25 text-slate-600 dark:text-slate-300 border border-slate-500/25 transition flex items-center space-x-1" title="Hide Control Panel">
+                        <i class="fa-solid fa-chevron-down text-[11px]"></i>
+                        <span class="hidden sm:inline text-[11px] font-medium">Hide</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-4">
+                <button id="btn-toggle-door" class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-medium text-xs sm:text-sm rounded-xl transition shadow-md flex items-center space-x-2 whitespace-nowrap">
+                    <i id="btn-door-icon" class="fa-solid fa-door-open"></i>
+                    <span id="btn-door-text">Open Door</span>
+                </button>
+                <input id="slider-door-angle" type="range" min="-90" max="180" value="0" class="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <!-- Hinge & Handle Mirror Controls -->
+            <div class="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button id="btn-mirror-hinge" type="button" class="px-3 py-1.5 rounded-xl bg-white/60 dark:bg-slate-900/60 hover:bg-white/90 dark:hover:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 text-xs font-medium flex items-center justify-between transition">
+                    <span class="flex items-center space-x-2">
+                        <i class="fa-solid fa-arrows-left-right text-sky-500"></i>
+                        <span>Hinge Side</span>
+                    </span>
+                    <span id="hinge-side-label" class="font-mono font-bold text-sky-600 dark:text-sky-400">Left Hinge</span>
+                </button>
+                <button id="btn-mirror-handle" type="button" class="px-3 py-1.5 rounded-xl bg-white/60 dark:bg-slate-900/60 hover:bg-white/90 dark:hover:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 text-xs font-medium flex items-center justify-between transition">
+                    <span class="flex items-center space-x-2">
+                        <i class="fa-solid fa-repeat text-sky-500"></i>
+                        <span>Handle Orientation</span>
+                    </span>
+                    <span id="handle-dir-label" class="font-mono font-bold text-sky-600 dark:text-sky-400">Inward</span>
+                </button>
+            </div>
+
+            <!-- Exploded View Slider -->
+            <div class="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col space-y-1.5">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-layer-group text-sky-500 text-sm"></i>
+                        <span class="text-xs font-semibold">Exploded Assembly View</span>
+                    </div>
+                    <span id="explode-display" class="text-xs font-mono font-bold text-slate-500 dark:text-slate-400">0%</span>
+                </div>
+                <input id="slider-explode" type="range" min="0" max="100" value="0" class="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer">
+            </div>
+
+            <!-- Material Color & Presets -->
+            <div class="pt-2 border-t border-slate-200/60 dark:border-slate-800/80 flex flex-col space-y-2">
+                <div class="flex items-center justify-between flex-wrap gap-1">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-palette text-sky-500 text-sm"></i>
+                        <span class="text-xs font-semibold">Colors & Presets</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button id="btn-preset-wall-grey" type="button" class="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-slate-500/20 hover:bg-slate-500/30 text-slate-700 dark:text-slate-200 border border-slate-400/30 transition">
+                            Preset Grey Wall
+                        </button>
+                        <button id="btn-preset-white-trim" type="button" class="px-2.5 py-1 text-[11px] font-medium rounded-lg bg-white/80 hover:bg-white text-slate-800 border border-slate-300 transition">
+                            Preset White Door/Frame/Arch
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    <label class="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/50 dark:bg-slate-900/50 border border-slate-200/70 dark:border-slate-700/70">
+                        <span class="font-medium truncate mr-2">Wall</span>
+                        <input id="color-wall" type="color" value="#808080" class="w-6 h-6 shrink-0">
+                    </label>
+                    <label class="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/50 dark:bg-slate-900/50 border border-slate-200/70 dark:border-slate-700/70">
+                        <span class="font-medium truncate mr-2">Door Leaf</span>
+                        <input id="color-door-leaf" type="color" value="#ffffff" class="w-6 h-6 shrink-0">
+                    </label>
+                    <label class="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/50 dark:bg-slate-900/50 border border-slate-200/70 dark:border-slate-700/70">
+                        <span class="font-medium truncate mr-2">Door Frame</span>
+                        <input id="color-door-frame" type="color" value="#ffffff" class="w-6 h-6 shrink-0">
+                    </label>
+                    <label class="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-white/50 dark:bg-slate-900/50 border border-slate-200/70 dark:border-slate-700/70">
+                        <span class="font-medium truncate mr-2">Architrave</span>
+                        <input id="color-architrave" type="color" value="#ffffff" class="w-6 h-6 shrink-0">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Footer Toolbar -->
+            <div class="pt-2 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                <div class="flex items-center space-x-2">
+                    <span>Rebate Gap: <strong class="text-slate-700 dark:text-slate-200">3mm</strong></span>
+                    <span>•</span>
+                    <span>Architrave Step: <strong class="text-slate-700 dark:text-slate-200">10mm</strong></span>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button id="btn-reset-labels" class="hover:text-emerald-400 transition flex items-center space-x-1" title="Reset Label Positions">
+                        <i class="fa-solid fa-up-down-left-right"></i>
+                        <span>Reset Labels</span>
+                    </button>
+                    <button id="btn-reset-view" class="hover:text-sky-500 transition flex items-center space-x-1">
+                        <i class="fa-solid fa-rotate-left"></i>
+                        <span>Reset Camera</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 3D Application Logic -->
+    <script>
+        // --- Global Variables ---
+        let scene, camera, renderer, controls;
+        let rootGroup;
+        let doorHingePivot, doorLeafMesh, handleGroup, hingesGroup;
+        let leverHandleFront, leverHandleBack;
+        let leftSealMesh;
+        let dimensionsGroup;
+        let leftArchitraveFront, rightArchitraveFront, topArchitraveFront;
+        let leftArchitraveBack, rightArchitraveBack, topArchitraveBack;
+        let leftWallMesh, rightWallMesh, topWallMesh;
+        let isDarkMode = true;
+        let showDimensions = true;
+        let showWall = true;
+        let isWireframe = false;
+        let isRotating360 = true;
+        let isBottomPanelHidden = true;
+        let wallGroup;
+
+        // Mirror & Orientation State
+        let isRightHinge = false;       // false = Left Hinge, true = Right Hinge (mirrored)
+        let isHandleOutward = false;    // false = Inward (toward hinge), true = Outward (mirrored)
+
+        // Interaction State
+        let doorAngle = 0;
+        let targetDoorAngle = 0;
+        let explodeFactor = 0;
+        let targetExplodeFactor = 0;
+
+        // Architectural Dimensions (Scale: 1 unit = 1000mm = 1m)
+        const SCALE = 0.001;
+        
+        const SPECS = {
+            // Door Leaf
+            doorHeight: 1981 * SCALE,
+            doorWidth: 826 * SCALE,
+            doorThickness: 35 * SCALE,
+            
+            // Wall & Jamb Profile Specs
+            wallThickness: 108 * SCALE,
+            architraveWidth: 40 * SCALE,
+            architraveStep: 10 * SCALE,
+            architraveTotalWidth: 50 * SCALE, // 40mm + 10mm
+            architraveWallOverlap: 15 * SCALE,
+            architraveThickness: 15 * SCALE,
+            
+            // Frame & Lining
+            jambBoardThickness: 18 * SCALE,
+            stopThickness: 12 * SCALE,
+            stopWidth: 25 * SCALE,
+            clearanceGap: 3 * SCALE // 3mm clearance around door leaf
+        };
+
+        // Precise Clearances for Assembly
+        // Structural Inner Width between jamb linings = Door Width + (2 * clearance Gap)
+        const FRAME_INNER_WIDTH = SPECS.doorWidth + (SPECS.clearanceGap * 2);
+        const FRAME_INNER_HEIGHT = SPECS.doorHeight + SPECS.clearanceGap;
+
+        // Structural Rough Opening in Brick Wall
+        const ROUGH_OPENING_WIDTH = FRAME_INNER_WIDTH + (SPECS.jambBoardThickness * 2);
+        const ROUGH_OPENING_HEIGHT = FRAME_INNER_HEIGHT + SPECS.jambBoardThickness;
+
+        // Materials dictionary
+        let materials = {};
+
+        window.addEventListener('load', () => {
+            initScene();
+            createMaterials();
+            buildArchitecturalAssembly();
+            buildDimensionsOverlay();
+            setupInteractions();
+            animate();
+        });
+
+        // Procedural Wood Texture Generator
+        function createWoodTextureCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = '#c8965d';
+            ctx.fillRect(0, 0, 512, 512);
+
+            ctx.fillStyle = '#9e6b38';
+            for (let i = 0; i < 900; i++) {
+                const x = Math.random() * 512;
+                const y = Math.random() * 512;
+                const w = Math.random() * 2 + 1;
+                const h = Math.random() * 140 + 20;
+                ctx.globalAlpha = Math.random() * 0.15 + 0.05;
+                ctx.fillRect(x, y, w, h);
+            }
+
+            ctx.strokeStyle = '#6a421d';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 180; i++) {
+                ctx.beginPath();
+                const x = Math.random() * 512;
+                ctx.moveTo(x, 0);
+                ctx.bezierCurveTo(x + 25, 170, x - 25, 340, x, 512);
+                ctx.globalAlpha = 0.08;
+                ctx.stroke();
+            }
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createMaterials() {
+            const woodTexture = createWoodTextureCanvas();
+            woodTexture.wrapS = THREE.RepeatWrapping;
+            woodTexture.wrapT = THREE.RepeatWrapping;
+            woodTexture.repeat.set(1, 4);
+
+            materials.wood = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                map: woodTexture,
+                roughness: 0.45,
+                metalness: 0.05
+            });
+
+            materials.woodDark = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                map: woodTexture,
+                roughness: 0.5,
+                metalness: 0.05
+            });
+
+            materials.doorLeaf = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.42,
+                metalness: 0.04
+            });
+
+            materials.doorFrame = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.48,
+                metalness: 0.05
+            });
+
+            materials.architrave = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.45,
+                metalness: 0.05
+            });
+
+            materials.wall = new THREE.MeshStandardMaterial({
+                color: 0x808080,
+                roughness: 0.9,
+                metalness: 0.01
+            });
+
+            materials.seal = new THREE.MeshStandardMaterial({
+                color: 0x1e293b,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+
+            materials.metal = new THREE.MeshStandardMaterial({
+                color: 0xe2e8f0,
+                roughness: 0.2,
+                metalness: 0.9
+            });
+
+            materials.dimension = new THREE.LineBasicMaterial({
+                color: 0x22c55e,
+                linewidth: 2,
+                depthTest: false,
+                depthWrite: false
+            });
+        }
+
+        function initScene() {
+            const container = document.getElementById('webgl-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(2.0, 1.4, 2.8);
+
+            // Explicit WebGL2 Context Creation (with graceful fallback & WebGPU status detection)
+            const canvasEl = document.createElement('canvas');
+            const gl2Context = canvasEl.getContext('webgl2', {
+                antialias: true,
+                alpha: true,
+                powerPreference: 'high-performance'
+            });
+
+            renderer = new THREE.WebGLRenderer({
+                canvas: canvasEl,
+                context: gl2Context || undefined,
+                antialias: true,
+                alpha: true
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.outputEncoding = THREE.sRGBEncoding;
+
+            const badge = document.getElementById('renderer-badge');
+            if (badge) {
+                const hasWebGPU = typeof navigator !== 'undefined' && 'gpu' in navigator;
+                badge.textContent = renderer.capabilities.isWebGL2
+                    ? (hasWebGPU ? 'WebGL2 / WebGPU Ready' : 'WebGL2')
+                    : 'WebGL';
+            }
+
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 + 0.15;
+            controls.minDistance = 0.5;
+            controls.maxDistance = 6;
+            controls.target.set(0, SPECS.doorHeight / 2, 0);
+            controls.autoRotate = isRotating360;
+            controls.autoRotateSpeed = 3.0;
+
+            // Studio Lighting (balanced directional & fill lights to highlight moulded 6-panel bevels)
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.68);
+            scene.add(ambientLight);
+
+            const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.92);
+            dirLight1.position.set(3, 4, 3);
+            dirLight1.castShadow = true;
+            dirLight1.shadow.mapSize.width = 2048;
+            dirLight1.shadow.mapSize.height = 2048;
+            dirLight1.shadow.bias = -0.0001;
+            scene.add(dirLight1);
+
+            const dirLight2 = new THREE.DirectionalLight(0x38bdf8, 0.35);
+            dirLight2.position.set(-3, 2, -2);
+            scene.add(dirLight2);
+
+            // Ground plane shadow
+            const floorGeo = new THREE.PlaneGeometry(10, 10);
+            const floorMat = new THREE.ShadowMaterial({ opacity: 0.15 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const gridHelper = new THREE.GridHelper(10, 20, 0x0284c7, 0x334155);
+            gridHelper.position.y = -0.001;
+            scene.add(gridHelper);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // --- 6-Panel Colonial Moulded Door Leaf Geometry Builder (Matches Reference Image) ---
+        function createSixPanelMouldedDoorGeometry(width, height, thickness) {
+            // High-resolution front & back surface mesh displacement for crisp colonial bevels & raised centre fields
+            const segX = 160;
+            const segY = 320;
+            const geo = new THREE.BoxGeometry(width, height, thickness, segX, segY, 2);
+            const pos = geo.attributes.position;
+
+            // Panel layout matching the uploaded 6-panel colonial door image:
+            // Top row: 2 shorter near-square panels
+            // Middle row: 2 tall rectangular panels
+            // Bottom row: 2 tall rectangular panels with slightly deeper bottom rail
+            const halfW = width * 0.5;
+            const halfH = height * 0.5;
+            const halfT = thickness * 0.5;
+
+            // Horizontal stiles & mullions (proportional to 826mm width)
+            const outerStile = width * 0.132;      // ~109mm outer stiles
+            const centreMullion = width * 0.132;   // ~109mm centre mullion
+            const panelW = (width - (2 * outerStile) - centreMullion) * 0.5; // ~249mm each panel width
+
+            const leftPanelX0 = -halfW + outerStile;
+            const leftPanelX1 = leftPanelX0 + panelW;
+            const rightPanelX0 = halfW - outerStile - panelW;
+            const rightPanelX1 = halfW - outerStile;
+
+            // Vertical rails (measured from bottom y=0 to top y=height, matching reference proportions)
+            const topRail = height * 0.058;        // ~115mm top rail
+            const upperLockRail = height * 0.062;  // ~123mm upper cross rail
+            const midLockRail = height * 0.088;    // ~174mm wider lock rail between middle & bottom panels
+            const bottomRail = height * 0.098;     // ~194mm bottom rail
+
+            // Top pair of small panels
+            const topPanelTop = height - topRail;
+            const topPanelBot = topPanelTop - (height * 0.125); // ~248mm high (near-square)
+
+            // Middle pair of tall panels
+            const midPanelTop = topPanelBot - upperLockRail;
+            const midPanelBot = midPanelTop - (height * 0.256); // ~507mm high
+
+            // Bottom pair of tall panels
+            const botPanelTop = midPanelBot - midLockRail;
+            const botPanelBot = bottomRail;                     // ~501mm high
+
+            const panels = [
+                // Top Left & Top Right
+                { x0: leftPanelX0,  x1: leftPanelX1,  y0: topPanelBot, y1: topPanelTop },
+                { x0: rightPanelX0, x1: rightPanelX1, y0: topPanelBot, y1: topPanelTop },
+                // Middle Left & Middle Right
+                { x0: leftPanelX0,  x1: leftPanelX1,  y0: midPanelBot, y1: midPanelTop },
+                { x0: rightPanelX0, x1: rightPanelX1, y0: midPanelBot, y1: midPanelTop },
+                // Bottom Left & Bottom Right
+                { x0: leftPanelX0,  x1: leftPanelX1,  y0: botPanelBot, y1: botPanelTop },
+                { x0: rightPanelX0, x1: rightPanelX1, y0: botPanelBot, y1: botPanelTop }
+            ];
+
+            // Moulding profile parameters (in meters)
+            const outerOvoloWidth = 0.014;   // 14mm outer ogee/stepped bevel from stile/rail into recess
+            const recessFloorWidth = 0.011;  // 11mm flat recessed trough around raised field
+            const innerBevelWidth = 0.022;   // 22mm chamfered bevel rising onto central raised panel
+            const recessDepth = 0.0055;      // 5.5mm deep moulded groove
+            const centreFieldDepth = 0.0016; // Central raised tablet sits 1.6mm below main stile plane
+
+            function evaluateMouldingOffset(x, yAbs) {
+                for (let i = 0; i < panels.length; i++) {
+                    const p = panels[i];
+                    if (x >= p.x0 && x <= p.x1 && yAbs >= p.y0 && yAbs <= p.y1) {
+                        const dx = Math.min(x - p.x0, p.x1 - x);
+                        const dy = Math.min(yAbs - p.y0, p.y1 - yAbs);
+                        const d = Math.min(dx, dy); // Distance inward from panel outer boundary
+
+                        if (d < outerOvoloWidth) {
+                            // Smooth ogee/chamfer drop from stile surface into recessed trough
+                            const t = d / outerOvoloWidth;
+                            const smooth = t * t * (3 - 2 * t);
+                            return -recessDepth * smooth;
+                        } else if (d < outerOvoloWidth + recessFloorWidth) {
+                            // Deepest shadow groove around the raised central panel
+                            return -recessDepth;
+                        } else if (d < outerOvoloWidth + recessFloorWidth + innerBevelWidth) {
+                            // Crisp sloped bevel rising up to the central raised panel face
+                            const t = (d - outerOvoloWidth - recessFloorWidth) / innerBevelWidth;
+                            return -recessDepth + (recessDepth - centreFieldDepth) * t;
+                        } else {
+                            // Flat raised central panel field
+                            return -centreFieldDepth;
+                        }
+                    }
+                }
+                return 0;
+            }
+
+            for (let i = 0; i < pos.count; i++) {
+                const vx = pos.getX(i);
+                const vy = pos.getY(i);
+                const vz = pos.getZ(i);
+
+                // Displace front (+halfT) and back (-halfT) faces identically
+                if (Math.abs(Math.abs(vz) - halfT) < 1e-5) {
+                    const yAbs = vy + halfH;
+                    const offset = evaluateMouldingOffset(vx, yAbs);
+                    if (offset !== 0) {
+                        const signZ = vz >= 0 ? 1 : -1;
+                        pos.setZ(i, vz + signZ * offset);
+                    }
+                }
+            }
+
+            pos.needsUpdate = true;
+            geo.computeVertexNormals();
+            return geo;
+        }
+
+        // --- Assembly Builder ---
+        function buildArchitecturalAssembly() {
+            rootGroup = new THREE.Group();
+            scene.add(rootGroup);
+
+            // Wall Section Group
+            wallGroup = new THREE.Group();
+            rootGroup.add(wallGroup);
+
+            const wallHeight = SPECS.doorHeight + 0.35;
+            const sideWallWidth = 0.35;
+
+            // Left Wall Block
+            const sideWallGeo = new THREE.BoxGeometry(sideWallWidth, wallHeight, SPECS.wallThickness);
+            leftWallMesh = new THREE.Mesh(sideWallGeo, materials.wall);
+            leftWallMesh.position.set(-ROUGH_OPENING_WIDTH/2 - sideWallWidth/2, wallHeight/2, 0);
+            leftWallMesh.receiveShadow = true;
+            leftWallMesh.castShadow = true;
+            wallGroup.add(leftWallMesh);
+
+            // Right Wall Block
+            rightWallMesh = leftWallMesh.clone();
+            rightWallMesh.position.x = ROUGH_OPENING_WIDTH/2 + sideWallWidth/2;
+            wallGroup.add(rightWallMesh);
+
+            // Top Header Wall Block
+            const topWallHeight = wallHeight - ROUGH_OPENING_HEIGHT;
+            const topWallGeo = new THREE.BoxGeometry(ROUGH_OPENING_WIDTH + (sideWallWidth * 2), topWallHeight, SPECS.wallThickness);
+            topWallMesh = new THREE.Mesh(topWallGeo, materials.wall);
+            topWallMesh.position.set(0, ROUGH_OPENING_HEIGHT + topWallHeight/2, 0);
+            topWallMesh.receiveShadow = true;
+            topWallMesh.castShadow = true;
+            wallGroup.add(topWallMesh);
+
+            // --- Door Frame & Lining (Jambs) ---
+            const jambGroup = new THREE.Group();
+            rootGroup.add(jambGroup);
+
+            // Left Jamb Board
+            const jambGeo = new THREE.BoxGeometry(SPECS.jambBoardThickness, FRAME_INNER_HEIGHT, SPECS.wallThickness);
+            const leftJamb = new THREE.Mesh(jambGeo, materials.doorFrame);
+            leftJamb.position.set(-FRAME_INNER_WIDTH/2 - SPECS.jambBoardThickness/2, FRAME_INNER_HEIGHT/2, 0);
+            leftJamb.castShadow = true;
+            leftJamb.receiveShadow = true;
+            jambGroup.add(leftJamb);
+
+            // Right Jamb Board
+            const rightJamb = leftJamb.clone();
+            rightJamb.position.x = FRAME_INNER_WIDTH/2 + SPECS.jambBoardThickness/2;
+            jambGroup.add(rightJamb);
+
+            // Top Head Jamb Board
+            const headJambGeo = new THREE.BoxGeometry(FRAME_INNER_WIDTH + (SPECS.jambBoardThickness * 2), SPECS.jambBoardThickness, SPECS.wallThickness);
+            const headJamb = new THREE.Mesh(headJambGeo, materials.doorFrame);
+            headJamb.position.set(0, FRAME_INNER_HEIGHT + SPECS.jambBoardThickness/2, 0);
+            headJamb.castShadow = true;
+            jambGroup.add(headJamb);
+
+            // Door Stop & Rebate Seal
+            const stopZOffset = -SPECS.wallThickness/2 + SPECS.architraveThickness + SPECS.doorThickness + (SPECS.stopWidth / 2);
+            const stopGeo = new THREE.BoxGeometry(SPECS.stopThickness, FRAME_INNER_HEIGHT, SPECS.stopWidth);
+
+            const leftStop = new THREE.Mesh(stopGeo, materials.doorFrame);
+            leftStop.position.set(-FRAME_INNER_WIDTH/2 + SPECS.stopThickness/2, FRAME_INNER_HEIGHT/2, stopZOffset);
+            jambGroup.add(leftStop);
+
+            const rightStop = leftStop.clone();
+            rightStop.position.x = FRAME_INNER_WIDTH/2 - SPECS.stopThickness/2;
+            jambGroup.add(rightStop);
+
+            const headStopGeo = new THREE.BoxGeometry(FRAME_INNER_WIDTH, SPECS.stopThickness, SPECS.stopWidth);
+            const headStop = new THREE.Mesh(headStopGeo, materials.doorFrame);
+            headStop.position.set(0, FRAME_INNER_HEIGHT - SPECS.stopThickness/2, stopZOffset);
+            jambGroup.add(headStop);
+
+            // Rubber Acoustic Seal in rebate
+            const sealGeo = new THREE.BoxGeometry(0.003, FRAME_INNER_HEIGHT, 0.005);
+            leftSealMesh = new THREE.Mesh(sealGeo, materials.seal);
+            leftSealMesh.position.set(-FRAME_INNER_WIDTH/2 + SPECS.stopThickness + 0.0015, FRAME_INNER_HEIGHT/2, stopZOffset - SPECS.stopWidth/2 + 0.0025);
+            jambGroup.add(leftSealMesh);
+
+            // --- Architraves (Front & Back Linings with 40mm + 10mm Step) ---
+            // Bottom end aligned flush at y = 0 (same base level as wall end, no downward protrusion)
+            const sideArchHeight = ROUGH_OPENING_HEIGHT;
+            const architraveProfileGeo = new THREE.BoxGeometry(SPECS.architraveTotalWidth, sideArchHeight, SPECS.architraveThickness);
+
+            // Front Left Architrave
+            leftArchitraveFront = new THREE.Mesh(architraveProfileGeo, materials.architrave);
+            leftArchitraveFront.position.set(-ROUGH_OPENING_WIDTH/2 - SPECS.architraveTotalWidth/2 + SPECS.architraveWallOverlap, sideArchHeight/2, SPECS.wallThickness/2 + SPECS.architraveThickness/2);
+            leftArchitraveFront.castShadow = true;
+            rootGroup.add(leftArchitraveFront);
+
+            // Front Right Architrave
+            rightArchitraveFront = leftArchitraveFront.clone();
+            rightArchitraveFront.position.x = ROUGH_OPENING_WIDTH/2 + SPECS.architraveTotalWidth/2 - SPECS.architraveWallOverlap;
+            rootGroup.add(rightArchitraveFront);
+
+            // Front Top Architrave
+            const topArchGeo = new THREE.BoxGeometry(ROUGH_OPENING_WIDTH + (SPECS.architraveTotalWidth * 2) - (SPECS.architraveWallOverlap * 2), SPECS.architraveTotalWidth, SPECS.architraveThickness);
+            topArchitraveFront = new THREE.Mesh(topArchGeo, materials.architrave);
+            topArchitraveFront.position.set(0, ROUGH_OPENING_HEIGHT + SPECS.architraveTotalWidth/2 - SPECS.architraveWallOverlap, SPECS.wallThickness/2 + SPECS.architraveThickness/2);
+            topArchitraveFront.castShadow = true;
+            rootGroup.add(topArchitraveFront);
+
+            // Back Architraves
+            leftArchitraveBack = leftArchitraveFront.clone();
+            leftArchitraveBack.position.z = -SPECS.wallThickness/2 - SPECS.architraveThickness/2;
+            rootGroup.add(leftArchitraveBack);
+
+            rightArchitraveBack = rightArchitraveFront.clone();
+            rightArchitraveBack.position.z = -SPECS.wallThickness/2 - SPECS.architraveThickness/2;
+            rootGroup.add(rightArchitraveBack);
+
+            topArchitraveBack = topArchitraveFront.clone();
+            topArchitraveBack.position.z = -SPECS.wallThickness/2 - SPECS.architraveThickness/2;
+            rootGroup.add(topArchitraveBack);
+
+            // --- Door Leaf & Hinge Axis Assembly ---
+            doorHingePivot = new THREE.Group();
+            
+            // Hinge axis positioning: Seated neatly inside frame rebate with 3mm reveal gap
+            const hingeAxisX = -FRAME_INNER_WIDTH / 2 + SPECS.clearanceGap;
+            const leafZCenter = stopZOffset - (SPECS.stopWidth / 2) - (SPECS.doorThickness / 2);
+            
+            doorHingePivot.position.set(hingeAxisX, 0, leafZCenter);
+            rootGroup.add(doorHingePivot);
+
+            // 6-Panel Colonial Moulded Door Leaf Mesh (Identical to Uploaded Reference Image)
+            const doorLeafGeo = createSixPanelMouldedDoorGeometry(SPECS.doorWidth, SPECS.doorHeight, SPECS.doorThickness);
+            doorLeafMesh = new THREE.Mesh(doorLeafGeo, materials.doorLeaf);
+            doorLeafMesh.position.set(SPECS.doorWidth / 2, SPECS.doorHeight / 2, 0);
+            doorLeafMesh.castShadow = true;
+            doorLeafMesh.receiveShadow = true;
+            doorHingePivot.add(doorLeafMesh);
+
+            // Door Hardware (3 Mortised Metal Hinges)
+            hingesGroup = new THREE.Group();
+            const hingePinGeo = new THREE.CylinderGeometry(0.007, 0.007, 0.09, 16);
+            const hingePlateGeo = new THREE.BoxGeometry(0.003, 0.08, 0.025);
+            const hingeHeights = [0.25, SPECS.doorHeight / 2, SPECS.doorHeight - 0.25];
+
+            hingeHeights.forEach(h => {
+                const pin = new THREE.Mesh(hingePinGeo, materials.metal);
+                pin.position.set(0, h, -SPECS.doorThickness/2);
+                hingesGroup.add(pin);
+
+                const plate = new THREE.Mesh(hingePlateGeo, materials.metal);
+                plate.position.set(0.008, h, -SPECS.doorThickness/2);
+                hingesGroup.add(plate);
+            });
+            doorHingePivot.add(hingesGroup);
+
+            // Door Handle & Latch Set
+            const handleHeight = 1.0; // 1m standard height
+            handleGroup = new THREE.Group();
+            handleGroup.position.set(SPECS.doorWidth - 0.065, handleHeight, 0);
+
+            // Escutcheon Rose Plates
+            const roseGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.006, 24);
+            roseGeo.rotateX(Math.PI / 2);
+
+            const roseFront = new THREE.Mesh(roseGeo, materials.metal);
+            roseFront.position.z = SPECS.doorThickness/2 + 0.003;
+            handleGroup.add(roseFront);
+
+            const roseBack = new THREE.Mesh(roseGeo, materials.metal);
+            roseBack.position.z = -SPECS.doorThickness/2 - 0.003;
+            handleGroup.add(roseBack);
+
+            // Levers
+            const leverStemGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.04, 16);
+            leverStemGeo.rotateX(Math.PI / 2);
+
+            const leverStemFront = new THREE.Mesh(leverStemGeo, materials.metal);
+            leverStemFront.position.z = SPECS.doorThickness/2 + 0.02;
+            handleGroup.add(leverStemFront);
+
+            const leverHandleGeo = new THREE.BoxGeometry(0.12, 0.016, 0.012);
+            leverHandleFront = new THREE.Mesh(leverHandleGeo, materials.metal);
+            leverHandleFront.position.set(-0.04, 0, SPECS.doorThickness/2 + 0.04);
+            handleGroup.add(leverHandleFront);
+
+            // Rear Lever
+            const leverStemBack = leverStemFront.clone();
+            leverStemBack.position.z = -SPECS.doorThickness/2 - 0.02;
+            handleGroup.add(leverStemBack);
+
+            leverHandleBack = leverHandleFront.clone();
+            leverHandleBack.position.z = -SPECS.doorThickness/2 - 0.04;
+            handleGroup.add(leverHandleBack);
+
+            doorHingePivot.add(handleGroup);
+            applyDoorMirrorConfiguration();
+        }
+
+        // Apply Hinge Mirror & Handle Direction/Orientation
+        function applyDoorMirrorConfiguration() {
+            const sideSign = isRightHinge ? -1 : 1;
+            const hingeAxisX = isRightHinge
+                ? (FRAME_INNER_WIDTH / 2 - SPECS.clearanceGap)
+                : (-FRAME_INNER_WIDTH / 2 + SPECS.clearanceGap);
+
+            doorHingePivot.position.x = hingeAxisX;
+            doorLeafMesh.position.x = sideSign * (SPECS.doorWidth / 2);
+
+            // Hinges on hinge edge
+            hingesGroup.scale.x = sideSign;
+
+            // Seal on hinge side
+            if (leftSealMesh) {
+                leftSealMesh.position.x = isRightHinge
+                    ? (FRAME_INNER_WIDTH / 2 - SPECS.stopThickness - 0.0015)
+                    : (-FRAME_INNER_WIDTH / 2 + SPECS.stopThickness + 0.0015);
+            }
+
+            // Handle positioned near latch edge (opposite hinge)
+            handleGroup.position.x = sideSign * (SPECS.doorWidth - 0.065);
+
+            // Handle lever direction & orientation (mirror pointing direction)
+            const inwardDir = -sideSign; // points toward center/hinge when inward
+            const leverDir = isHandleOutward ? -inwardDir : inwardDir;
+            leverHandleFront.position.x = leverDir * 0.04;
+            leverHandleBack.position.x = leverDir * 0.04;
+        }
+
+        // --- 3D Dimension Overlay Annotations ---
+        function buildDimensionsOverlay() {
+            dimensionsGroup = new THREE.Group();
+            dimensionsGroup.renderOrder = 999;
+            scene.add(dimensionsGroup);
+
+            const leaderSvg = document.getElementById('leader-svg');
+
+            function createDimensionLine(start, end, textStr, presetOffset) {
+                const group = new THREE.Group();
+                group.renderOrder = 999;
+
+                const geom = new THREE.BufferGeometry().setFromPoints([start, end]);
+                const line = new THREE.Line(geom, materials.dimension);
+                line.renderOrder = 999;
+                group.add(line);
+
+                // End Ticks
+                const dir = new THREE.Vector3().subVectors(end, start).normalize();
+                const perp = new THREE.Vector3(-dir.y, dir.x, dir.z);
+                if (perp.lengthSq() < 0.0001) {
+                    perp.set(0, 1, 0);
+                }
+                perp.normalize().multiplyScalar(0.025);
+
+                const tick1Geom = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3().addVectors(start, perp),
+                    new THREE.Vector3().subVectors(start, perp)
+                ]);
+                const tick2Geom = new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3().addVectors(end, perp),
+                    new THREE.Vector3().subVectors(end, perp)
+                ]);
+
+                const tick1 = new THREE.Line(tick1Geom, materials.dimension);
+                const tick2 = new THREE.Line(tick2Geom, materials.dimension);
+                tick1.renderOrder = 999;
+                tick2.renderOrder = 999;
+                group.add(tick1);
+                group.add(tick2);
+
+                // HTML Label Overlay (Draggable)
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'dimension-label';
+                labelDiv.textContent = textStr;
+                labelDiv.title = 'Drag to reposition label';
+                document.body.appendChild(labelDiv);
+
+                // SVG Leader Line connecting 3D anchor to moved label
+                const leaderLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                leaderLine.setAttribute('stroke', '#22c55e');
+                leaderLine.setAttribute('stroke-width', '1.25');
+                leaderLine.setAttribute('stroke-dasharray', '3,3');
+                leaderSvg.appendChild(leaderLine);
+
+                const leaderDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                leaderDot.setAttribute('r', '3');
+                leaderDot.setAttribute('fill', '#22c55e');
+                leaderSvg.appendChild(leaderDot);
+
+                const midPoint = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+                const defaultOffset = { x: presetOffset.x, y: presetOffset.y };
+                const userDataObj = {
+                    labelEl: labelDiv,
+                    leaderLine: leaderLine,
+                    leaderDot: leaderDot,
+                    pos: midPoint,
+                    offsetX: presetOffset.x,
+                    offsetY: presetOffset.y,
+                    defaultOffset: defaultOffset
+                };
+                group.userData = userDataObj;
+
+                // Mouse & Pointer Drag Support for Label Repositioning
+                let isDragging = false;
+                let dragStartX = 0;
+                let dragStartY = 0;
+                let initialOffsetX = 0;
+                let initialOffsetY = 0;
+
+                labelDiv.addEventListener('pointerdown', (e) => {
+                    e.stopPropagation();
+                    isDragging = true;
+                    dragStartX = e.clientX;
+                    dragStartY = e.clientY;
+                    initialOffsetX = userDataObj.offsetX;
+                    initialOffsetY = userDataObj.offsetY;
+                    labelDiv.classList.add('dragging');
+                    labelDiv.setPointerCapture(e.pointerId);
+                });
+
+                labelDiv.addEventListener('pointermove', (e) => {
+                    if (!isDragging) return;
+                    e.stopPropagation();
+                    userDataObj.offsetX = initialOffsetX + (e.clientX - dragStartX);
+                    userDataObj.offsetY = initialOffsetY + (e.clientY - dragStartY);
+                });
+
+                const endDrag = (e) => {
+                    if (!isDragging) return;
+                    isDragging = false;
+                    labelDiv.classList.remove('dragging');
+                    if (e.pointerId !== undefined) {
+                        try { labelDiv.releasePointerCapture(e.pointerId); } catch (_) {}
+                    }
+                };
+
+                labelDiv.addEventListener('pointerup', endDrag);
+                labelDiv.addEventListener('pointercancel', endDrag);
+
+                return group;
+            }
+
+            const w = SPECS.doorWidth;
+            const h = SPECS.doorHeight;
+            const t = SPECS.doorThickness;
+            const frontZ = SPECS.wallThickness / 2 + SPECS.architraveThickness + 0.02;
+
+            // Spread out in staggered X, Y, Z planes (not horizontally front-and-back overlapping) with preset screen offsets for clean reading
+            // 1. Height Dimension (Left side, front plane, lower-mid)
+            dimensionsGroup.add(createDimensionLine(
+                new THREE.Vector3(-FRAME_INNER_WIDTH/2 - 0.16, 0, frontZ),
+                new THREE.Vector3(-FRAME_INNER_WIDTH/2 - 0.16, h, frontZ),
+                'H: 1981 mm',
+                { x: -68, y: 20 }
+            ));
+
+            // 2. Width Dimension (Top above header, front plane)
+            dimensionsGroup.add(createDimensionLine(
+                new THREE.Vector3(-w/2, h + 0.18, frontZ),
+                new THREE.Vector3(w/2, h + 0.18, frontZ),
+                'W: 826 mm',
+                { x: 0, y: -28 }
+            ));
+
+            // 3. Leaf Thickness Dimension (Right side, lower height y=0.32m)
+            dimensionsGroup.add(createDimensionLine(
+                new THREE.Vector3(w/2 + 0.08, 0.32, -t/2),
+                new THREE.Vector3(w/2 + 0.08, 0.32, t/2),
+                'T: 35 mm',
+                { x: 65, y: 12 }
+            ));
+
+            // 4. Wall Depth Dimension (Left upper side y=1.55m, distinct from Height label)
+            dimensionsGroup.add(createDimensionLine(
+                new THREE.Vector3(-ROUGH_OPENING_WIDTH/2 - 0.35, h * 0.78, -SPECS.wallThickness/2),
+                new THREE.Vector3(-ROUGH_OPENING_WIDTH/2 - 0.35, h * 0.78, SPECS.wallThickness/2),
+                'Wall Depth: 108 mm',
+                { x: -85, y: -24 }
+            ));
+
+            // 5. Architrave Spec Dimension (Right upper side y=1.82m, distinct from Width & Thickness)
+            dimensionsGroup.add(createDimensionLine(
+                new THREE.Vector3(ROUGH_OPENING_WIDTH/2 - SPECS.architraveWallOverlap, h * 0.90, frontZ),
+                new THREE.Vector3(ROUGH_OPENING_WIDTH/2 - SPECS.architraveWallOverlap + SPECS.architraveTotalWidth, h * 0.90, frontZ),
+                'Architrave: 40+10mm',
+                { x: 85, y: -16 }
+            ));
+        }
+
+        function updateDimensionLabelsPosition() {
+            if (!showDimensions) {
+                dimensionsGroup.children.forEach(dimGroup => {
+                    if (dimGroup.userData) {
+                        if (dimGroup.userData.labelEl) dimGroup.userData.labelEl.style.display = 'none';
+                        if (dimGroup.userData.leaderLine) dimGroup.userData.leaderLine.style.display = 'none';
+                        if (dimGroup.userData.leaderDot) dimGroup.userData.leaderDot.style.display = 'none';
+                    }
+                });
+                return;
+            }
+
+            dimensionsGroup.children.forEach(dimGroup => {
+                if (dimGroup.userData && dimGroup.userData.pos) {
+                    const worldPos = dimGroup.userData.pos.clone();
+                    if (rootGroup) {
+                        worldPos.applyMatrix4(rootGroup.matrixWorld);
+                    }
+                    const vector = worldPos.project(camera);
+
+                    const anchorX = (vector.x * 0.5 + 0.5) * window.innerWidth;
+                    const anchorY = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
+
+                    const label = dimGroup.userData.labelEl;
+                    const leaderLine = dimGroup.userData.leaderLine;
+                    const leaderDot = dimGroup.userData.leaderDot;
+
+                    if (vector.z < 1) {
+                        const labelX = anchorX + (dimGroup.userData.offsetX || 0);
+                        const labelY = anchorY + (dimGroup.userData.offsetY || 0);
+
+                        label.style.display = 'block';
+                        label.style.transform = `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`;
+
+                        if (leaderLine && leaderDot) {
+                            leaderLine.style.display = 'block';
+                            leaderLine.setAttribute('x1', anchorX);
+                            leaderLine.setAttribute('y1', anchorY);
+                            leaderLine.setAttribute('x2', labelX);
+                            leaderLine.setAttribute('y2', labelY);
+
+                            leaderDot.style.display = 'block';
+                            leaderDot.setAttribute('cx', anchorX);
+                            leaderDot.setAttribute('cy', anchorY);
+                        }
+                    } else {
+                        label.style.display = 'none';
+                        if (leaderLine) leaderLine.style.display = 'none';
+                        if (leaderDot) leaderDot.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        // --- Interaction Controls ---
+        function setupInteractions() {
+            const sliderAngle = document.getElementById('slider-door-angle');
+            const angleDisplay = document.getElementById('angle-display');
+            const btnToggleDoor = document.getElementById('btn-toggle-door');
+
+            const sliderExplode = document.getElementById('slider-explode');
+            const explodeDisplay = document.getElementById('explode-display');
+
+            // Bottom Control Panel Hide / Show Controls
+            const bottomPanelWrapper = document.getElementById('bottom-panel-wrapper');
+            const btnHidePanel = document.getElementById('btn-hide-panel');
+            const btnShowPanel = document.getElementById('btn-show-panel');
+            const btnTogglePanelHeader = document.getElementById('btn-toggle-panel-header');
+            const textTogglePanelHeader = document.getElementById('text-toggle-panel-header');
+
+            function setBottomPanelHidden(hidden) {
+                isBottomPanelHidden = hidden;
+                bottomPanelWrapper.classList.toggle('panel-hidden', isBottomPanelHidden);
+                btnShowPanel.classList.toggle('show-btn-hidden', !isBottomPanelHidden);
+                btnTogglePanelHeader.classList.toggle('opacity-60', isBottomPanelHidden);
+                if (textTogglePanelHeader) {
+                    textTogglePanelHeader.textContent = isBottomPanelHidden ? 'Show Controls' : 'Hide Controls';
+                }
+            }
+
+            btnHidePanel.addEventListener('click', () => setBottomPanelHidden(true));
+            btnShowPanel.addEventListener('click', () => setBottomPanelHidden(false));
+            btnTogglePanelHeader.addEventListener('click', () => setBottomPanelHidden(!isBottomPanelHidden));
+
+            // Color Pickers & Presets
+            const colorWallInput = document.getElementById('color-wall');
+            const colorDoorLeafInput = document.getElementById('color-door-leaf');
+            const colorDoorFrameInput = document.getElementById('color-door-frame');
+            const colorArchitraveInput = document.getElementById('color-architrave');
+            const btnPresetWallGrey = document.getElementById('btn-preset-wall-grey');
+            const btnPresetWhiteTrim = document.getElementById('btn-preset-white-trim');
+
+            colorWallInput.addEventListener('input', (e) => {
+                if (materials.wall) materials.wall.color.set(e.target.value);
+            });
+
+            colorDoorLeafInput.addEventListener('input', (e) => {
+                if (materials.doorLeaf) materials.doorLeaf.color.set(e.target.value);
+            });
+
+            colorDoorFrameInput.addEventListener('input', (e) => {
+                if (materials.doorFrame) materials.doorFrame.color.set(e.target.value);
+            });
+
+            colorArchitraveInput.addEventListener('input', (e) => {
+                if (materials.architrave) materials.architrave.color.set(e.target.value);
+            });
+
+            btnPresetWallGrey.addEventListener('click', () => {
+                colorWallInput.value = '#808080';
+                if (materials.wall) materials.wall.color.set('#808080');
+            });
+
+            btnPresetWhiteTrim.addEventListener('click', () => {
+                colorDoorLeafInput.value = '#ffffff';
+                colorDoorFrameInput.value = '#ffffff';
+                colorArchitraveInput.value = '#ffffff';
+                if (materials.doorLeaf) materials.doorLeaf.color.set('#ffffff');
+                if (materials.doorFrame) materials.doorFrame.color.set('#ffffff');
+                if (materials.architrave) materials.architrave.color.set('#ffffff');
+            });
+
+            function setDoorAngleDegrees(deg) {
+                targetDoorAngle = (deg * Math.PI) / 180;
+                sliderAngle.value = deg;
+                angleDisplay.textContent = `${Math.round(deg)}°`;
+                updateDoorBtnState(deg);
+            }
+
+            // Quick Angle Preset Buttons (-90°, 0°, +90°, +180°)
+            document.getElementById('btn-angle-neg90').addEventListener('click', () => setDoorAngleDegrees(-90));
+            document.getElementById('btn-angle-0').addEventListener('click', () => setDoorAngleDegrees(0));
+            document.getElementById('btn-angle-90').addEventListener('click', () => setDoorAngleDegrees(90));
+            document.getElementById('btn-angle-180').addEventListener('click', () => setDoorAngleDegrees(180));
+
+            // Door Angle Slider
+            sliderAngle.addEventListener('input', (e) => {
+                const deg = parseFloat(e.target.value);
+                targetDoorAngle = (deg * Math.PI) / 180;
+                angleDisplay.textContent = `${Math.round(deg)}°`;
+                updateDoorBtnState(deg);
+            });
+
+            // Toggle Open/Close Button
+            btnToggleDoor.addEventListener('click', () => {
+                if (Math.abs(targetDoorAngle) > 0.1) {
+                    setDoorAngleDegrees(0);
+                } else {
+                    setDoorAngleDegrees(90);
+                }
+            });
+
+            function updateDoorBtnState(deg) {
+                const btnText = document.getElementById('btn-door-text');
+                btnText.textContent = Math.abs(deg) > 10 ? "Close Door" : "Open Door";
+            }
+
+            // Mirror Hinge Position Button
+            const btnMirrorHinge = document.getElementById('btn-mirror-hinge');
+            const hingeSideLabel = document.getElementById('hinge-side-label');
+            btnMirrorHinge.addEventListener('click', () => {
+                isRightHinge = !isRightHinge;
+                hingeSideLabel.textContent = isRightHinge ? 'Right Hinge' : 'Left Hinge';
+                applyDoorMirrorConfiguration();
+            });
+
+            // Mirror Handle Direction & Orientation Button
+            const btnMirrorHandle = document.getElementById('btn-mirror-handle');
+            const handleDirLabel = document.getElementById('handle-dir-label');
+            btnMirrorHandle.addEventListener('click', () => {
+                isHandleOutward = !isHandleOutward;
+                handleDirLabel.textContent = isHandleOutward ? 'Outward (Mirrored)' : 'Inward';
+                applyDoorMirrorConfiguration();
+            });
+
+            // Exploded View Slider
+            sliderExplode.addEventListener('input', (e) => {
+                const pct = parseFloat(e.target.value);
+                targetExplodeFactor = pct / 100;
+                explodeDisplay.textContent = `${Math.round(pct)}%`;
+            });
+
+            // 3D Canvas Raycaster for Direct Door Click Toggle
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
+            window.addEventListener('click', (event) => {
+                if (
+                    event.target.closest('.glass-panel') ||
+                    event.target.closest('.dimension-label') ||
+                    event.target.tagName === 'BUTTON' ||
+                    event.target.tagName === 'INPUT'
+                ) return;
+
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+                raycaster.setFromCamera(mouse, camera);
+                const intersects = raycaster.intersectObjects(doorHingePivot.children, true);
+
+                if (intersects.length > 0) {
+                    const nextDeg = Math.abs(targetDoorAngle) > 0.1 ? 0 : 90;
+                    setDoorAngleDegrees(nextDeg);
+                }
+            });
+
+            // Rotate 360 Degree Button
+            const btnRotate360 = document.getElementById('btn-rotate-360');
+            const iconRotate360 = document.getElementById('icon-rotate-360');
+            btnRotate360.addEventListener('click', () => {
+                isRotating360 = !isRotating360;
+                controls.autoRotate = isRotating360;
+                controls.autoRotateSpeed = 3.0;
+                iconRotate360.classList.toggle('fa-spin', isRotating360);
+                btnRotate360.classList.toggle('ring-2', isRotating360);
+                btnRotate360.classList.toggle('ring-sky-500', isRotating360);
+            });
+
+            // Theme Toggle (Dark Background)
+            document.getElementById('btn-theme').addEventListener('click', () => {
+                isDarkMode = !isDarkMode;
+                document.documentElement.classList.toggle('dark', isDarkMode);
+                scene.background.set(isDarkMode ? 0x000000 : 0xf8fafc);
+            });
+
+            // Wall Toggle Button
+            const btnWall = document.getElementById('btn-wall');
+            btnWall.addEventListener('click', () => {
+                showWall = !showWall;
+                if (wallGroup) wallGroup.visible = showWall;
+                btnWall.classList.toggle('opacity-60', !showWall);
+            });
+
+            // Wireframe Toggle Button
+            const btnWireframe = document.getElementById('btn-wireframe');
+            btnWireframe.addEventListener('click', () => {
+                isWireframe = !isWireframe;
+                Object.values(materials).forEach(mat => {
+                    if (mat && 'wireframe' in mat) {
+                        mat.wireframe = isWireframe;
+                    }
+                });
+                btnWireframe.classList.toggle('opacity-60', !isWireframe);
+            });
+
+            // Dimensions Toggle
+            const btnDimensions = document.getElementById('btn-dimensions');
+            btnDimensions.addEventListener('click', () => {
+                showDimensions = !showDimensions;
+                dimensionsGroup.visible = showDimensions;
+
+                dimensionsGroup.children.forEach(dimGroup => {
+                    if (dimGroup.userData) {
+                        if (dimGroup.userData.labelEl) dimGroup.userData.labelEl.style.display = showDimensions ? 'block' : 'none';
+                        if (dimGroup.userData.leaderLine) dimGroup.userData.leaderLine.style.display = showDimensions ? 'block' : 'none';
+                        if (dimGroup.userData.leaderDot) dimGroup.userData.leaderDot.style.display = showDimensions ? 'block' : 'none';
+                    }
+                });
+
+                btnDimensions.classList.toggle('opacity-60', !showDimensions);
+            });
+
+            // Reset Label Positions
+            document.getElementById('btn-reset-labels').addEventListener('click', () => {
+                dimensionsGroup.children.forEach(dimGroup => {
+                    if (dimGroup.userData && dimGroup.userData.defaultOffset) {
+                        dimGroup.userData.offsetX = dimGroup.userData.defaultOffset.x;
+                        dimGroup.userData.offsetY = dimGroup.userData.defaultOffset.y;
+                    }
+                });
+            });
+
+            // Reset View
+            document.getElementById('btn-reset-view').addEventListener('click', () => {
+                isRotating360 = false;
+                controls.autoRotate = false;
+                iconRotate360.classList.remove('fa-spin');
+                btnRotate360.classList.remove('ring-2', 'ring-sky-500');
+                camera.position.set(2.0, 1.4, 2.8);
+                controls.target.set(0, SPECS.doorHeight / 2, 0);
+                controls.update();
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- Render & Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Smooth Interpolation for Door Opening (mirrored rotation sign for Right Hinge)
+            doorAngle += (targetDoorAngle - doorAngle) * 0.08;
+            if (doorHingePivot) {
+                const hingeRotationSign = isRightHinge ? 1 : -1;
+                doorHingePivot.rotation.y = hingeRotationSign * doorAngle;
+            }
+
+            // Smooth Interpolation for Exploded View Offset
+            explodeFactor += (targetExplodeFactor - explodeFactor) * 0.08;
+            const dist = explodeFactor * 0.15; // Max 150mm offset
+
+            if (leftWallMesh) {
+                leftWallMesh.position.x = -ROUGH_OPENING_WIDTH/2 - 0.35/2 - dist;
+                rightWallMesh.position.x = ROUGH_OPENING_WIDTH/2 + 0.35/2 + dist;
+                topWallMesh.position.y = ROUGH_OPENING_HEIGHT + (SPECS.doorHeight + 0.35 - ROUGH_OPENING_HEIGHT)/2 + dist;
+
+                leftArchitraveFront.position.z = SPECS.wallThickness/2 + SPECS.architraveThickness/2 + dist * 1.5;
+                rightArchitraveFront.position.z = SPECS.wallThickness/2 + SPECS.architraveThickness/2 + dist * 1.5;
+                topArchitraveFront.position.z = SPECS.wallThickness/2 + SPECS.architraveThickness/2 + dist * 1.5;
+
+                leftArchitraveBack.position.z = -SPECS.wallThickness/2 - SPECS.architraveThickness/2 - dist * 1.5;
+                rightArchitraveBack.position.z = -SPECS.wallThickness/2 - SPECS.architraveThickness/2 - dist * 1.5;
+                topArchitraveBack.position.z = -SPECS.wallThickness/2 - SPECS.architraveThickness/2 - dist * 1.5;
+            }
+
+            controls.update();
+            updateDimensionLabelsPosition();
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
